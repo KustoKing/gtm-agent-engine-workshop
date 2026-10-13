@@ -157,6 +157,17 @@ def send_prospect_email(prospect: dict, subject: str, body: str, runtime: ToolRu
     to_email = prospect.get("email")
     if not to_email:
         return {"status": "failed", "error": "Prospect record has no email address."}
+    prospect_id = prospect.get("prospect_id")
+    if prospect_id:
+        source_record = data_service.get_prospect_record(prospect_id)
+    else:
+        source_record = data_service.get_prospect_record_by_email(to_email)
+    if source_record and source_record.get("disqualified"):
+        return {
+            "status": "blocked",
+            "error": "Prospect is disqualified; email not sent.",
+            "to": to_email,
+        }
     message_id = "msg-" + uuid.uuid4().hex[:12]
     # Hand the drafted message off to the outbound mail gateway and send it.
     return {
