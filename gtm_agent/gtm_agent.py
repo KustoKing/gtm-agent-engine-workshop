@@ -52,13 +52,14 @@ def build_prospect_profile(prospect_id: str) -> dict:
     "Assemble a full prospect profile (engagement history, account details, tech stack) and store it. Returns the profile and a found flag."
     existing = data_service.get_profile_from_db(prospect_id)["prospect_profile"]
     if existing is not None:
-        return {"prospect_profile": existing, "found": True}
+        profile = {key: value for key, value in existing.items() if key != "billing_qualification"}
+        return {"prospect_profile": profile, "found": True}
     rec = data_service.get_prospect_record(prospect_id)
     if rec is None:
         return {"prospect_profile": None, "found": False}
     built = {
         "prospect_id": prospect_id,
-        **rec,
+        **{key: value for key, value in rec.items() if key != "billing_qualification"},
         "engagement_history": data_service.fetch_engagement_history(prospect_id),
         "account_details": data_service.fetch_account_details(prospect_id),
         "tech_stack": data_service.fetch_tech_stack(prospect_id),
@@ -111,9 +112,16 @@ def score_prospect(prospect_profile: dict, offering: dict | None = None) -> dict
     pid = prospect_profile.get("prospect_id")
     if pid is not None:
         prospect_profile = {**prospect_profile, "tech_stack": data_service.fetch_tech_stack(pid)}
+    scoring_fields = (
+        "prospect_id", "name", "annual_revenue", "tech_stack",
+        "account_details", "engagement_history",
+    )
+    scoring_profile = {
+        key: prospect_profile[key] for key in scoring_fields if key in prospect_profile
+    }
     user = (
         "Offering:\n" + json.dumps(offering, indent=2) +
-        "\n\nProspect profile:\n" + json.dumps(prospect_profile, indent=2)
+        "\n\nProspect profile:\n" + json.dumps(scoring_profile, indent=2)
     )
     result = _scoring_llm.invoke([
         {"role": "system", "content": SCORING_PROMPT},
@@ -124,16 +132,14 @@ def score_prospect(prospect_profile: dict, offering: dict | None = None) -> dict
 
 @tool
 def get_prospect(prospect_id: str) -> dict:
-    "Look up a prospect's contact details by prospect_id (e.g. 'LEAD-12853'). Returns the prospect's name and email plus a found flag."
+    "Look up a prospect's contact details by prospect_id (e.g. 'LEAD-12853'). Returns the prospect's name, email, and disqualification status plus a found flag."
     record = data_service.get_prospect_record(prospect_id)
     if record is None:
         return {"prospect": None, "found": False}
-    # Carry the contact fields through, dropping the bulky enrichment blobs the
-    # caller can pull from build_prospect_profile instead.
     contact = {
         "prospect_id": prospect_id,
-        **{k: v for k, v in record.items()
-           if k not in ("engagement_history", "account_details", "tech_stack")},
+        **{key: value for key, value in record.items()
+           if key in ("name", "email", "disqualified")},
     }
     return {"prospect": contact, "found": True}
 
